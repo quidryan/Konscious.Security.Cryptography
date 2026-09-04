@@ -28,11 +28,29 @@ namespace Konscious.Security.Cryptography
 
         public byte[] Secret { get; set; }
 
+        public IArgon2MemoryAllocator MemoryAllocator { get; set; } = DefaultArgon2MemoryAllocator.Instance;
+
         // private stuff starts here
         internal async Task<byte[]> Hash(byte[] password)
         {
             var lanes = await InitializeLanes(password).ConfigureAwait(false);
+            try
+            {
+                return await FillAndFinalize(lanes).ConfigureAwait(false);
+            }
+            finally
+            {
+                // Return the lane buffers to the allocator. This is a no-op for the default allocator (the GC
+                // reclaims them); a pooling allocator recycles them so the next hash reuses the same memory.
+                foreach (var lane in lanes)
+                {
+                    lane?.Dispose();
+                }
+            }
+        }
 
+        private async Task<byte[]> FillAndFinalize(Argon2Lane[] lanes)
+        {
             var start = 2;
             for (var i = 0; i < Iterations; ++i)
             {
@@ -160,7 +178,7 @@ namespace Konscious.Security.Cryptography
             Task[] init = new Task[lanes.Length * 2];
             for (var i = 0; i < lanes.Length; ++i)
             {
-                lanes[i] = new Argon2Lane(blocksPerLane);
+                lanes[i] = new Argon2Lane(blocksPerLane, MemoryAllocator ?? DefaultArgon2MemoryAllocator.Instance);
 
                 int taskIndex = i * 2;
                 int iClosure = i;
