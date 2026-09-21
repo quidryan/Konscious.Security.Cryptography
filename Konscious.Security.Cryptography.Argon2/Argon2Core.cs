@@ -42,10 +42,17 @@ namespace Konscious.Security.Cryptography
             {
                 // Return the lane buffers to the allocator. This is a no-op for the default allocator (the GC
                 // reclaims them); a pooling allocator recycles them so the next hash reuses the same memory.
-                foreach (var lane in lanes)
-                {
-                    lane?.Dispose();
-                }
+                ReturnLanes(lanes);
+            }
+        }
+
+        // Return every lane's working buffer to the allocator. Safe to call with a partially populated array
+        // (unset entries are null) as long as no lane initialization work is still running.
+        private static void ReturnLanes(Argon2Lane[] lanes)
+        {
+            foreach (var lane in lanes)
+            {
+                lane?.Dispose();
             }
         }
 
@@ -175,11 +182,25 @@ namespace Konscious.Security.Cryptography
                 throw new InvalidOperationException($"Memory should be enough to provide at least 4 blocks per {nameof(DegreeOfParallelism)}");
             }
 
+            // Rent all lane buffers first. If renting one throws (e.g. OutOfMemoryException, or a bounded pooling
+            // allocator that refuses further buffers), return the buffers already rented so the pool does not
+            // leak them. No initialization work is running yet, so disposing here is safe.
+            try
+            {
+                for (var i = 0; i < lanes.Length; ++i)
+                {
+                    lanes[i] = new Argon2Lane(blocksPerLane, MemoryAllocator ?? DefaultArgon2MemoryAllocator.Instance);
+                }
+            }
+            catch
+            {
+                ReturnLanes(lanes);
+                throw;
+            }
+
             Task[] init = new Task[lanes.Length * 2];
             for (var i = 0; i < lanes.Length; ++i)
             {
-                lanes[i] = new Argon2Lane(blocksPerLane, MemoryAllocator ?? DefaultArgon2MemoryAllocator.Instance);
-
                 int taskIndex = i * 2;
                 int iClosure = i;
                 init[taskIndex] = Task.Run(() =>
@@ -203,7 +224,17 @@ namespace Konscious.Security.Cryptography
                 });
             }
 
-            await Task.WhenAll(init).ConfigureAwait(false);
+            try
+            {
+                await Task.WhenAll(init).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Task.WhenAll completes only once every task has finished, so no worker is still touching a
+                // lane buffer here; returning them to the allocator is safe.
+                ReturnLanes(lanes);
+                throw;
+            }
 
             Array.Clear(blockHash, 0, blockHash.Length);
             return lanes;

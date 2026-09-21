@@ -11,7 +11,8 @@ namespace Konscious.Security.Cryptography
 
             // The allocator contract requires Rent to return zeroed memory: Argon2's first pass XORs into each
             // block (dest ^= ...), so a non-zeroed starting buffer would corrupt the hash. The default allocator
-            // hands back a fresh (zeroed) array; pooling allocators are responsible for clearing reused buffers.
+            // hands back a fresh (zeroed) array, and Dispose zeroes reused buffers before returning them, so a
+            // pooling allocator can recycle the same memory without clearing it itself.
             _rented = allocator.Rent(length);
             _memory = new Memory<ulong>(_rented, 0, length);
             BlockCount = blockCount;
@@ -38,6 +39,11 @@ namespace Konscious.Security.Cryptography
             if (rented != null)
             {
                 _rented = null;
+
+                // Clear the working memory before handing it back. It holds password-derived state, so zeroing
+                // wipes that material promptly, and it lets any allocator (including a pool) satisfy the
+                // "Rent returns zeroed" contract without clearing again.
+                Array.Clear(rented, 0, 128 * BlockCount);
                 _allocator.Return(rented);
             }
         }

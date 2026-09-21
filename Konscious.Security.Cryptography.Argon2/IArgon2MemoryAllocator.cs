@@ -23,8 +23,8 @@ namespace Konscious.Security.Cryptography
         /// </summary>
         /// <remarks>
         /// The returned memory MUST be zeroed. Argon2's first pass XORs into each block (<c>dest ^= ...</c>), so a
-        /// non-zeroed buffer would corrupt the hash. The default allocator satisfies this by returning a fresh
-        /// array; pooling implementations must clear buffers on rent or return.
+        /// non-zeroed buffer would corrupt the hash. Buffers are cleared before being handed to <see cref="Return"/>,
+        /// so a pool may recycle a returned buffer as-is; the default allocator returns a fresh (already zeroed) array.
         /// </remarks>
         /// <param name="minimumLength">The minimum number of <see cref="ulong"/> elements required.</param>
         ulong[] Rent(int minimumLength);
