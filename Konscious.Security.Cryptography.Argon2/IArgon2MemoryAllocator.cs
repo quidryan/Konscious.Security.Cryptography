@@ -9,6 +9,12 @@ namespace Konscious.Security.Cryptography
     /// the buffers instead (e.g. a bounded pool, or <c>ArrayPool</c>), following the same Rent/Return shape.
     /// See https://github.com/kmaragon/Konscious.Security.Cryptography/issues/35.
     /// </summary>
+    /// <remarks>
+    /// Implementations must be safe for concurrent use. A single allocator is typically shared across many hashes
+    /// running in parallel, and Argon2 calls <see cref="Rent"/> once per lane and <see cref="Return"/> from a
+    /// <c>finally</c> without synchronizing itself, so an unsynchronized pool could hand the same buffer to two
+    /// lanes and corrupt the output.
+    /// </remarks>
     public interface IArgon2MemoryAllocator
     {
         /// <summary>
